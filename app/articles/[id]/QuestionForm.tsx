@@ -2,7 +2,13 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-export function QuestionForm({ articleId, onDone }: { articleId: number; onDone?: () => void }) {
+export function QuestionForm({
+  articleId,           // ★ string
+  onDone,
+}: {
+  articleId: string;   // ★ string に変更
+  onDone?: () => void;
+}) {
   const [phrase, setPhrase] = useState('');
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
@@ -12,13 +18,15 @@ export function QuestionForm({ articleId, onDone }: { articleId: number; onDone?
     e.preventDefault();
     setErr(null);
     if (!phrase.trim()) { setErr('フレーズは必須'); return; }
+
     setSaving(true);
     const { error } = await supabase.from('questions').insert({
-      article_id: articleId,
+      article_id: articleId,               // ★ そのまま渡す
       phrase: phrase.trim(),
       comment: comment.trim() || null,
     });
     setSaving(false);
+
     if (error) { setErr(error.message); return; }
     setPhrase(''); setComment('');
     onDone?.();
@@ -30,7 +38,7 @@ export function QuestionForm({ articleId, onDone }: { articleId: number; onDone?
         <label className="block text-sm text-gray-300">分からないフレーズ</label>
         <input
           value={phrase}
-          onChange={(e)=>setPhrase(e.target.value)}
+          onChange={(e) => setPhrase(e.target.value)}
           placeholder="例: in light of"
           className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none"
         />
@@ -39,7 +47,7 @@ export function QuestionForm({ articleId, onDone }: { articleId: number; onDone?
         <label className="block text-sm text-gray-300">補足（任意）</label>
         <textarea
           value={comment}
-          onChange={(e)=>setComment(e.target.value)}
+          onChange={(e) => setComment(e.target.value)}
           rows={2}
           placeholder="どの文で困ったか等"
           className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none"

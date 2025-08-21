@@ -7,13 +7,13 @@ import { supabase } from '@/lib/supabaseClient';
 import { QuestionForm } from './QuestionForm';
 import { AnswerForm } from './AnswerForm';
 
-type Article = { id: number; title: string; url?: string | null; created_at?: string };
+type Article = { id: string; title: string; url?: string | null; created_at?: string };
 type Question = { id: number; phrase: string; comment?: string | null; created_at?: string };
 type Answer = { id: number; question_id: number; phrase?: string | null; meaning?: string | null; nuance?: string | null; created_at?: string };
 
 export default function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const articleId = Number(id);
+  const articleId = id as string; // ★ uuidは文字列のまま
 
   const [article, setArticle] = useState<Article | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -25,7 +25,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
     const { data, error } = await supabase
       .from('articles')
       .select('id, title, url, created_at')
-      .eq('id', articleId)
+      .eq('id', articleId) // ★ 文字列のuuidで検索
       .single();
     if (error) throw new Error(error.message);
     setArticle(data);
@@ -35,12 +35,12 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
     const { data: qs, error: qErr } = await supabase
       .from('questions')
       .select('id, phrase, comment, created_at')
-      .eq('article_id', articleId)
+      .eq('article_id', articleId) // ★ ここもuuid文字列
       .order('id', { ascending: false });
     if (qErr) throw new Error(qErr.message);
 
-    const qIds = (qs ?? []).map(q => q.id);
-    let ansBy: Record<number, Answer[]> = {};
+    const qIds = (qs ?? []).map((q) => q.id);
+    const by: Record<number, Answer[]> = {};
     if (qIds.length) {
       const { data: ans, error: aErr } = await supabase
         .from('answers')
@@ -49,12 +49,12 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         .order('id', { ascending: false });
       if (aErr) throw new Error(aErr.message);
       for (const a of ans ?? []) {
-        ansBy[a.question_id] ||= [];
-        ansBy[a.question_id].push(a);
+        by[a.question_id] ??= [];
+        by[a.question_id].push(a);
       }
     }
     setQuestions(qs ?? []);
-    setAnswersByQ(ansBy);
+    setAnswersByQ(by);
   }, [articleId]);
 
   useEffect(() => {
@@ -92,7 +92,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       <section className="rounded-xl border border-gray-700 bg-gray-800/30">
         <div className="border-b border-gray-700 px-5 py-3 text-sm text-gray-300">この記事の「分からない」を投稿</div>
         <div className="px-5 py-4">
-          <QuestionForm articleId={articleId} onDone={loadQA} />
+          <QuestionForm articleId={articleId} onDone={loadQA} /> {/* ★ string を渡す */}
         </div>
       </section>
 
@@ -101,7 +101,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         <h2 className="text-lg font-semibold text-white">質問と回答</h2>
         {questions.length === 0 && <p className="text-gray-400">まだ質問がありません</p>}
 
-        {questions.map(q => (
+        {questions.map((q) => (
           <div key={q.id} className="rounded-xl border border-gray-700 bg-gray-800/30 p-4 space-y-3">
             <div className="text-sm">
               <span className="font-semibold text-gray-200">フレーズ：</span>{q.phrase}
@@ -109,14 +109,13 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             {q.comment && <div className="text-sm text-gray-300">補足：{q.comment}</div>}
 
             <div className="space-y-2">
-              {(answersByQ[q.id] ?? []).map(a => (
+              {(answersByQ[q.id] ?? []).map((a) => (
                 <div key={a.id} className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
                   <div><span className="font-semibold text-gray-200">表現：</span>{a.phrase ?? '—'}</div>
                   <div><span className="font-semibold text-gray-200">意味：</span>{a.meaning ?? '—'}</div>
                   <div><span className="font-semibold text-gray-200">ニュアンス・使い方：</span>{a.nuance ?? '—'}</div>
                 </div>
               ))}
-              {/* 回答フォーム（質問ごと） */}
               <AnswerForm questionId={q.id} onDone={loadQA} />
             </div>
           </div>
