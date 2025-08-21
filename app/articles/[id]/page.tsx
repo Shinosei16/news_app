@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { use, useEffect, useState, useCallback } from 'react'; // ← use を追加
+import { use, useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import { AnswerForm } from './AnswerForm';
@@ -9,8 +9,7 @@ import { AnswerForm } from './AnswerForm';
 type Article = {
   id: number;
   title: string;
-  body?: string | null;
-  content?: string | null;
+  content?: string | null; // ← content に統一
   created_at?: string;
 };
 
@@ -25,10 +24,9 @@ type Answer = {
 export default function ArticlePage({
   params,
 }: {
-  params: Promise<{ id: string }>; // ← Promise にする
+  params: Promise<{ id: string }>; // Next.js 15: params は Promise
 }) {
-  // ← Promise をほどく
-  const { id } = use(params);
+  const { id } = use(params); // Promise をほどく
   const articleId = Number(id);
 
   const [article, setArticle] = useState<Article | null>(null);
@@ -39,9 +37,10 @@ export default function ArticlePage({
   const loadArticle = useCallback(async () => {
     const { data, error } = await supabase
       .from('articles')
-      .select('id, title, body, content, created_at')
+      .select('id, title, content, created_at') // ← body を外す
       .eq('id', articleId)
       .single();
+
     if (error) throw new Error(error.message);
     setArticle(data);
   }, [articleId]);
@@ -52,6 +51,7 @@ export default function ArticlePage({
       .select('id, phrase, meaning, nuance, created_at')
       .eq('article_id', articleId)
       .order('id', { ascending: false });
+
     if (error) throw new Error(error.message);
     setAnswers(data ?? []);
   }, [articleId]);
@@ -84,7 +84,7 @@ export default function ArticlePage({
         <section className="rounded-xl border border-gray-700 bg-gray-800/40 p-5 space-y-3">
           <h1 className="text-xl font-semibold text-white">{article.title}</h1>
           <p className="text-gray-200 whitespace-pre-wrap">
-            {article.body ?? article.content ?? '（本文なし）'}
+            {article.content ?? '（本文なし）'}
           </p>
         </section>
       )}
