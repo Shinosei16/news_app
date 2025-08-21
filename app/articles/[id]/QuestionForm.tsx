@@ -1,61 +1,51 @@
+// app/_components/QuestionForm.tsx
 'use client';
 import { useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-export function QuestionForm({
-  articleId,           // ★ string
-  onDone,
-}: {
-  articleId: string;   // ★ string に変更
-  onDone?: () => void;
-}) {
+export default function QuestionForm({ articleId }: { articleId: string }) {
+  const supabase = createClientComponentClient();
   const [phrase, setPhrase] = useState('');
   const [comment, setComment] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string|null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
-    if (!phrase.trim()) { setErr('フレーズは必須'); return; }
+    setErr(null); setBusy(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) { window.location.href = '/auth'; return; }
 
-    setSaving(true);
-    const { error } = await supabase.from('questions').insert({
-      article_id: articleId,               // ★ そのまま渡す
-      phrase: phrase.trim(),
-      comment: comment.trim() || null,
-    });
-    setSaving(false);
+      const { error } = await supabase.from('questions').insert({
+        article_id: articleId,
+        phrase: phrase.trim() || null,
+        comment: comment.trim() || null,
+        user_id: session.user.id, // profiles にFK
+      });
+      if (error) throw error;
 
-    if (error) { setErr(error.message); return; }
-    setPhrase(''); setComment('');
-    onDone?.();
+      setPhrase(''); setComment('');
+      window.dispatchEvent(new Event('qa:posted'));
+    } catch (e:any) {
+      setErr(e.message ?? '投稿に失敗しました');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 p-4 rounded-xl bg-gray-800/40">
-      <div>
-        <label className="block text-sm text-gray-300">分からないフレーズ</label>
-        <input
-          value={phrase}
-          onChange={(e) => setPhrase(e.target.value)}
-          placeholder="例: in light of"
-          className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none"
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-gray-300">補足（任意）</label>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          rows={2}
-          placeholder="どの文で困ったか等"
-          className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none"
-        />
-      </div>
+    <form onSubmit={submit} className="space-y-2">
+      <input placeholder="分からないフレーズ" value={phrase}
+        onChange={e=>setPhrase(e.target.value)}
+        className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none" />
+      <input placeholder="補足（任意）" value={comment}
+        onChange={e=>setComment(e.target.value)}
+        className="w-full rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 outline-none" />
       {err && <p className="text-red-400 text-sm">{err}</p>}
-      <button disabled={saving} className="rounded-lg px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60">
-        {saving ? '送信中…' : '質問を投稿'}
+      <button disabled={busy}
+        className="rounded-lg px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white">
+        {busy ? '送信中…' : '質問を投稿'}
       </button>
     </form>
   );
