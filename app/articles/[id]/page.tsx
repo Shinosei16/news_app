@@ -1,7 +1,7 @@
 'use client';
-export const dynamic = 'force-dynamic'; // ビルド時のプリレンダーで落ちない保険
+export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { use, useEffect, useState, useCallback } from 'react'; // ← use を追加
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import { AnswerForm } from './AnswerForm';
@@ -22,8 +22,15 @@ type Answer = {
   created_at?: string;
 };
 
-export default function ArticlePage({ params }: { params: { id: string } }) {
-  const articleId = Number(params.id);
+export default function ArticlePage({
+  params,
+}: {
+  params: Promise<{ id: string }>; // ← Promise にする
+}) {
+  // ← Promise をほどく
+  const { id } = use(params);
+  const articleId = Number(id);
+
   const [article, setArticle] = useState<Article | null>(null);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +42,6 @@ export default function ArticlePage({ params }: { params: { id: string } }) {
       .select('id, title, body, content, created_at')
       .eq('id', articleId)
       .single();
-
     if (error) throw new Error(error.message);
     setArticle(data);
   }, [articleId]);
@@ -46,7 +52,6 @@ export default function ArticlePage({ params }: { params: { id: string } }) {
       .select('id, phrase, meaning, nuance, created_at')
       .eq('article_id', articleId)
       .order('id', { ascending: false });
-
     if (error) throw new Error(error.message);
     setAnswers(data ?? []);
   }, [articleId]);
@@ -84,7 +89,7 @@ export default function ArticlePage({ params }: { params: { id: string } }) {
         </section>
       )}
 
-      {/* 回答フォーム（表現/意味/ニュアンスで分割） */}
+      {/* 回答フォーム */}
       <section className="rounded-xl border border-gray-700 bg-gray-800/30">
         <div className="border-b border-gray-700 px-5 py-3 text-sm text-gray-300">回答を投稿</div>
         <div className="px-5 py-4">
@@ -92,30 +97,19 @@ export default function ArticlePage({ params }: { params: { id: string } }) {
         </div>
       </section>
 
-      {/* 回答一覧（3区分表示） */}
+      {/* 回答一覧 */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-white">みんなの回答</h2>
 
-        {answers.length === 0 && (
-          <p className="text-gray-400">まだ回答がありません</p>
-        )}
+        {answers.length === 0 && <p className="text-gray-400">まだ回答がありません</p>}
 
         {answers.map((a) => (
           <div key={a.id} className="rounded-xl border border-gray-700 bg-gray-800/30 p-4">
             <div className="mb-2 text-xs text-gray-400">回答ID: {a.id}</div>
             <div className="space-y-2">
-              <div>
-                <span className="font-semibold text-gray-200">表現：</span>
-                {a.phrase ?? '—'}
-              </div>
-              <div>
-                <span className="font-semibold text-gray-200">意味：</span>
-                {a.meaning ?? '—'}
-              </div>
-              <div>
-                <span className="font-semibold text-gray-200">ニュアンス・使い方：</span>
-                {a.nuance ?? '—'}
-              </div>
+              <div><span className="font-semibold text-gray-200">表現：</span>{a.phrase ?? '—'}</div>
+              <div><span className="font-semibold text-gray-200">意味：</span>{a.meaning ?? '—'}</div>
+              <div><span className="font-semibold text-gray-200">ニュアンス・使い方：</span>{a.nuance ?? '—'}</div>
             </div>
           </div>
         ))}
