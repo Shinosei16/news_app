@@ -1,108 +1,125 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+export const dynamic = 'force-dynamic'; // ビルド時のプリレンダーで落ちない保険
+
+import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+import { AnswerForm } from './AnswerForm';
 
-export default function ArticleDetail() {
-  const { id } = useParams<{ id: string }>();
-  const [article, setArticle] = useState<any>(null);
-  const [questions, setQuestions] = useState<any[]>([]);
-  const [qBody, setQBody] = useState('');
+type Article = {
+  id: number;
+  title: string;
+  body?: string | null;
+  content?: string | null;
+  created_at?: string;
+};
 
-  const load = async () => {
-    const { data: a } = await supabase.from('articles').select('*').eq('id', id).single();
-    setArticle(a);
-    const { data: qs } = await supabase
-      .from('questions').select('*')
-      .eq('article_id', id)
-      .order('created_at', { ascending: true });
-    setQuestions(qs || []);
-  };
+type Answer = {
+  id: number;
+  phrase?: string | null;
+  meaning?: string | null;
+  nuance?: string | null;
+  created_at?: string;
+};
 
-  useEffect(() => { load(); }, [id]);
+export default function ArticlePage({ params }: { params: { id: string } }) {
+  const articleId = Number(params.id);
+  const [article, setArticle] = useState<Article | null>(null);
+  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  const postQuestion = async () => {
-    if (!qBody.trim()) return;
-    const { error } = await supabase.from('questions').insert({
-      article_id: id, body: qBody.trim(), user_name: 'anon'
-    });
-    if (!error) { setQBody(''); load(); }
-  };
+  const loadArticle = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('id, title, body, content, created_at')
+      .eq('id', articleId)
+      .single();
+
+    if (error) throw new Error(error.message);
+    setArticle(data);
+  }, [articleId]);
+
+  const loadAnswers = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('answers')
+      .select('id, phrase, meaning, nuance, created_at')
+      .eq('article_id', articleId)
+      .order('id', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    setAnswers(data ?? []);
+  }, [articleId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setErr(null);
+        await Promise.all([loadArticle(), loadAnswers()]);
+      } catch (e: any) {
+        setErr(e.message ?? '読み込みに失敗しました');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [loadArticle, loadAnswers]);
 
   return (
-    <main style={{ padding: 20 }}>
+    <main className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <Link href="/" className="text-sm text-blue-400 hover:underline">{'<'} 戻る</Link>
+        <span className="text-xs text-gray-400">Article ID: {articleId}</span>
+      </div>
+
+      {loading && <p className="text-gray-300">読み込み中…</p>}
+      {err && <p className="text-red-400">エラー: {err}</p>}
+
       {article && (
-        <>
-          <h1 style={{ fontWeight: 'bold' }}>{article.title || article.url}</h1>
-          <a href={article.url} target="_blank" style={{ textDecoration: 'underline' }}>記事を開く</a>
-        </>
+        <section className="rounded-xl border border-gray-700 bg-gray-800/40 p-5 space-y-3">
+          <h1 className="text-xl font-semibold text-white">{article.title}</h1>
+          <p className="text-gray-200 whitespace-pre-wrap">
+            {article.body ?? article.content ?? '（本文なし）'}
+          </p>
+        </section>
       )}
 
-      <section style={{ marginTop: 24 }}>
-        <h3>質問する</h3>
-        <textarea
-          value={qBody} onChange={e => setQBody(e.target.value)}
-          rows={3} style={{ width: '100%', border: '1px solid #ddd', padding: 8 }}
-          placeholder="わからないフレーズ・表現を書く"
-        />
-        <button onClick={postQuestion} style={{ marginTop: 8, padding: '6px 12px', border: '1px solid #333' }}>
-          投稿
-        </button>
+      {/* 回答フォーム（表現/意味/ニュアンスで分割） */}
+      <section className="rounded-xl border border-gray-700 bg-gray-800/30">
+        <div className="border-b border-gray-700 px-5 py-3 text-sm text-gray-300">回答を投稿</div>
+        <div className="px-5 py-4">
+          <AnswerForm articleId={articleId} onDone={loadAnswers} />
+        </div>
       </section>
 
-      <section style={{ marginTop: 24 }}>
-        <h3>質問一覧</h3>
-        {questions.map(q => <QuestionItem key={q.id} q={q} />)}
-        {!questions.length && <p style={{ color: '#666' }}>まだ質問はありません</p>}
-      </section>
-    </main>
-  );
-}
+      {/* 回答一覧（3区分表示） */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-white">みんなの回答</h2>
 
-function QuestionItem({ q }: { q: any }) {
-  const [answers, setAnswers] = useState<any[]>([]);
-  const [aBody, setABody] = useState('');
+        {answers.length === 0 && (
+          <p className="text-gray-400">まだ回答がありません</p>
+        )}
 
-  const loadA = async () => {
-    const { data } = await supabase
-      .from('answers').select('*')
-      .eq('question_id', q.id)
-      .order('created_at', { ascending: true });
-    setAnswers(data || []);
-  };
-  useEffect(() => { loadA(); }, [q.id]);
-
-  const postA = async () => {
-    if (!aBody.trim()) return;
-    const { error } = await supabase.from('answers').insert({
-      question_id: q.id, body: aBody.trim(), user_name: 'helper'
-    });
-    if (!error) { setABody(''); loadA(); }
-  };
-
-  return (
-    <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 6, marginTop: 12 }}>
-      <p style={{ whiteSpace: 'pre-wrap' }}>Q: {q.body}</p>
-
-      <div style={{ marginTop: 8 }}>
-        {answers.map(a => (
-          <div key={a.id} style={{ background: '#222', color: '#fff', padding: 8, borderRadius: 6, marginTop: 6 }}>
-            <p style={{ whiteSpace: 'pre-wrap' }}>{a.body}</p>
+        {answers.map((a) => (
+          <div key={a.id} className="rounded-xl border border-gray-700 bg-gray-800/30 p-4">
+            <div className="mb-2 text-xs text-gray-400">回答ID: {a.id}</div>
+            <div className="space-y-2">
+              <div>
+                <span className="font-semibold text-gray-200">表現：</span>
+                {a.phrase ?? '—'}
+              </div>
+              <div>
+                <span className="font-semibold text-gray-200">意味：</span>
+                {a.meaning ?? '—'}
+              </div>
+              <div>
+                <span className="font-semibold text-gray-200">ニュアンス・使い方：</span>
+                {a.nuance ?? '—'}
+              </div>
+            </div>
           </div>
         ))}
-        {!answers.length && <p style={{ color: '#999' }}>まだ回答はありません</p>}
-      </div>
-
-      <div style={{ marginTop: 8 }}>
-        <textarea
-          value={aBody} onChange={e => setABody(e.target.value)}
-          rows={2} style={{ width: '100%', border: '1px solid #ddd', padding: 8 }}
-          placeholder="回答を書く"
-        />
-        <button onClick={postA} style={{ marginTop: 6, padding: '6px 12px', border: '1px solid #333' }}>
-          回答する
-        </button>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
