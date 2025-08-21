@@ -1,44 +1,57 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export default function HeaderAuth() {
-  const [user, setUser] = useState<any>(null);
+  const supabase = createClientComponentClient();
+  const [email, setEmail] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
-    supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const u = session?.user;
+      setEmail(u?.email ?? null);
+      if (u) {
+        const { data } = await supabase.from('profiles').select('username').eq('id', u.id).single();
+        setUsername(data?.username ?? null);
+      } else {
+        setUsername(null);
+      }
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, s) => {
+      const u = s?.user ?? null;
+      setEmail(u?.email ?? null);
+      if (u) {
+        const { data } = await supabase.from('profiles').select('username').eq('id', u.id).single();
+        setUsername(data?.username ?? null);
+      } else {
+        setUsername(null);
+      }
     });
-  }, []);
+    return () => { sub.subscription.unsubscribe(); };
+  }, [supabase]);
 
-  async function handleLogin() {
-    const email = prompt('メールアドレスを入力してください:');
-    if (!email) return;
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    if (error) alert(error.message);
-    else alert('ログインリンクを送信しました');
-  }
-
-  async function handleLogout() {
-    await supabase.auth.signOut();
-  }
+  async function signOut() { await supabase.auth.signOut(); }
 
   return (
-    <header style={{ display:'flex', justifyContent:'space-between', padding:10, borderBottom:'1px solid #ccc' }}>
-      <div style={{ fontWeight:'bold' }}>記事アプリ</div>
-      <div>
-        {user ? (
+    <header style={{ padding:'12px 20px', borderBottom:'1px solid #374151',
+      display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+      <Link href="/" style={{fontWeight:700}}>英語ニュースQA</Link>
+      <nav style={{display:'flex', gap:12, alignItems:'center'}}>
+        <Link href="/new-article" className="underline">記事を登録</Link>
+        {email ? (
           <>
-            <span style={{ marginRight: 8 }}>
-              {user.email} さん
+            <span className="text-xs text-gray-300">
+              {username ?? email}
             </span>
-            <button onClick={handleLogout}>ログアウト</button>
+            <button onClick={signOut} className="px-3 py-1 border border-gray-600 rounded">ログアウト</button>
           </>
         ) : (
-          <button onClick={handleLogin}>ログイン</button>
+          <Link href="/auth" className="px-3 py-1 border border-gray-600 rounded">ログイン</Link>
         )}
-      </div>
+      </nav>
     </header>
   );
 }

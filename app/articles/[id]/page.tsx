@@ -1,125 +1,195 @@
 'use client';
-export const dynamic = 'force-dynamic';
 
-import { use, useEffect, useState, useCallback } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
-import { QuestionForm } from './QuestionForm';
-import { AnswerForm } from './AnswerForm';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import QuestionForm from '../../_components/QuestionForm';
+import AnswerForm from '../../_components/AnswerForm';
 
-type Article = { id: string; title: string; url?: string | null; created_at?: string };
-type Question = { id: number; phrase: string; comment?: string | null; created_at?: string };
-type Answer = { id: number; question_id: number; phrase?: string | null; meaning?: string | null; nuance?: string | null; created_at?: string };
+type Article = { id: string; title: string | null; url: string | null; created_at: string };
+
+// 画面で使う“表示用”に絞った型（シンプル）
+type QuestionView = {
+  id: string;
+  phrase: string | null;
+  comment: string | null;
+  created_at: string;
+  userName: string | null;
+};
+
+type AnswerView = {
+  id: string;
+  question_id: string;
+  phrase: string | null;
+  meaning: string | null;
+  nuance: string | null;
+  created_at: string;
+  userName: string | null;
+};
 
 export default function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
+  // Next.js 15: params は Promise なので unwrap
   const { id } = use(params);
-  const articleId = id as string; // ★ uuidは文字列のまま
+  const supabase = createClientComponentClient();
 
   const [article, setArticle] = useState<Article | null>(null);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [answersByQ, setAnswersByQ] = useState<Record<number, Answer[]>>({});
-  const [loading, setLoading] = useState(true);
+  const [questions, setQuestions] = useState<QuestionView[]>([]);
+  const [answersByQ, setAnswersByQ] = useState<Record<string, AnswerView[]>>({});
   const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const loadArticle = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('articles')
-      .select('id, title, url, created_at')
-      .eq('id', articleId) // ★ 文字列のuuidで検索
-      .single();
-    if (error) throw new Error(error.message);
-    setArticle(data);
-  }, [articleId]);
+  // Supabase が profiles(username) を配列で返すケースを吸収
+  function pickName(p: any): string | null {
+    if (!p) return null;
+    if (Array.isArray(p)) return p[0]?.username ?? null;
+    return p.username ?? null;
+  }
 
-  const loadQA = useCallback(async () => {
-    const { data: qs, error: qErr } = await supabase
-      .from('questions')
-      .select('id, phrase, comment, created_at')
-      .eq('article_id', articleId) // ★ ここもuuid文字列
-      .order('id', { ascending: false });
-    if (qErr) throw new Error(qErr.message);
+  async function load() {
+    setErr(null);
+    setLoading(true);
+    try {
+      // 記事
+      const { data: a, error: e1 } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (e1) throw e1;
+      setArticle(a as Article);
 
-    const qIds = (qs ?? []).map((q) => q.id);
-    const by: Record<number, Answer[]> = {};
-    if (qIds.length) {
-      const { data: ans, error: aErr } = await supabase
-        .from('answers')
-        .select('id, question_id, phrase, meaning, nuance, created_at')
-        .in('question_id', qIds)
-        .order('id', { ascending: false });
-      if (aErr) throw new Error(aErr.message);
-      for (const a of ans ?? []) {
-        by[a.question_id] ??= [];
-        by[a.question_id].push(a);
+      // 質問（投稿者名を JOIN）
+      const { data: qs, error: e2 } = await supabase
+        .from('questions')
+        .select('id, phrase, comment, created_at, profiles(username)')
+        .eq('article_id', id)
+        .order('created_at', { ascending: true });
+      if (e2) throw e2;
+
+      const qViews: QuestionView[] = (qs ?? []).map((q: any) => ({
+        id: q.id,
+        phrase: q.phrase ?? null,
+        comment: q.comment ?? null,
+        created_at: q.created_at,
+        userName: pickName(q.profiles),
+      }));
+      setQuestions(qViews);
+
+      // 回答（回答者名を JOIN）
+      const qIds = qViews.map((q) => q.id);
+      if (qIds.length) {
+        const { data: ans, error: e3 } = await supabase
+          .from('answers')
+          .select('id, question_id, phrase, meaning, nuance, created_at, profiles(username)')
+          .in('question_id', qIds)
+          .order('created_at', { ascending: true });
+        if (e3) throw e3;
+
+        const grouped: Record<string, AnswerView[]> = {};
+        for (const a of ans ?? []) {
+          const av: AnswerView = {
+            id: a.id,
+            question_id: a.question_id,
+            phrase: a.phrase ?? null,
+            meaning: a.meaning ?? null,
+            nuance: a.nuance ?? null,
+            created_at: a.created_at,
+            userName: pickName(a.profiles),
+          };
+          (grouped[av.question_id] ||= []).push(av);
+        }
+        setAnswersByQ(grouped);
+      } else {
+        setAnswersByQ({});
       }
+    } catch (e: any) {
+      setErr(e.message ?? '読み込みに失敗しました');
+    } finally {
+      setLoading(false);
     }
-    setQuestions(qs ?? []);
-    setAnswersByQ(by);
-  }, [articleId]);
+  }
 
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true); setErr(null);
-        await Promise.all([loadArticle(), loadQA()]);
-      } catch (e: any) { setErr(e.message ?? '読み込みに失敗しました'); }
-      finally { setLoading(false); }
-    })();
-  }, [loadArticle, loadQA]);
+    load();
+    // 投稿完了イベント（QuestionForm / AnswerForm が発火）
+    const handler = () => load();
+    window.addEventListener('qa:posted', handler as EventListener);
+    return () => window.removeEventListener('qa:posted', handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <Link href="/" className="text-sm text-blue-400 hover:underline">{'<'} 戻る</Link>
-        <span className="text-xs text-gray-400">Article ID: {articleId}</span>
-      </div>
+    <main style={{ padding: 20 }}>
+      <Link href="/" className="underline">{'< 戻る'}</Link>
 
-      {loading && <p className="text-gray-300">読み込み中…</p>}
-      {err && <p className="text-red-400">エラー: {err}</p>}
+      {loading && <p className="text-gray-400 mt-3">読み込み中…</p>}
+      {err && <p className="text-red-400 mt-3">{err}</p>}
 
       {article && (
-        <section className="rounded-xl border border-gray-700 bg-gray-800/40 p-5 space-y-2">
-          <h1 className="text-xl font-semibold text-white">{article.title}</h1>
+        <section className="mt-3">
+          <div className="text-sm text-gray-400">Article ID: {article.id}</div>
+          <h1 className="text-xl font-bold mt-1">{article.title ?? article.url}</h1>
           {article.url && (
-            <a href={article.url} target="_blank" rel="noreferrer" className="text-blue-400 underline text-sm">
-              元記事を開く
-            </a>
+            <Link href={article.url} target="_blank" className="underline">元記事を開く</Link>
           )}
         </section>
       )}
 
-      {/* 質問投稿 */}
-      <section className="rounded-xl border border-gray-700 bg-gray-800/30">
-        <div className="border-b border-gray-700 px-5 py-3 text-sm text-gray-300">この記事の「分からない」を投稿</div>
-        <div className="px-5 py-4">
-          <QuestionForm articleId={articleId} onDone={loadQA} /> {/* ★ string を渡す */}
-        </div>
+      {/* 質問フォーム */}
+      <section className="mt-6 p-4 border border-gray-700 rounded-xl">
+        <h2 className="font-semibold mb-2">この記事の「分からない」を投稿</h2>
+        <QuestionForm articleId={id} />
       </section>
 
-      {/* 質問一覧 + 回答 */}
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold text-white">質問と回答</h2>
-        {questions.length === 0 && <p className="text-gray-400">まだ質問がありません</p>}
+      {/* Q&A 一覧 */}
+      <section className="mt-6">
+        <h2 className="font-semibold mb-2">質問と回答</h2>
 
-        {questions.map((q) => (
-          <div key={q.id} className="rounded-xl border border-gray-700 bg-gray-800/30 p-4 space-y-3">
-            <div className="text-sm">
-              <span className="font-semibold text-gray-200">フレーズ：</span>{q.phrase}
-            </div>
-            {q.comment && <div className="text-sm text-gray-300">補足：{q.comment}</div>}
+        {!questions.length && !loading && (
+          <p className="text-gray-400 text-sm">まだ質問がありません</p>
+        )}
 
-            <div className="space-y-2">
-              {(answersByQ[q.id] ?? []).map((a) => (
-                <div key={a.id} className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
-                  <div><span className="font-semibold text-gray-200">表現：</span>{a.phrase ?? '—'}</div>
-                  <div><span className="font-semibold text-gray-200">意味：</span>{a.meaning ?? '—'}</div>
-                  <div><span className="font-semibold text-gray-200">ニュアンス・使い方：</span>{a.nuance ?? '—'}</div>
-                </div>
-              ))}
-              <AnswerForm questionId={q.id} onDone={loadQA} />
+        <div className="space-y-4">
+          {questions.map((q) => (
+            <div key={q.id} className="border border-gray-700 rounded-xl p-4">
+              <div className="text-sm">
+                <span className="font-semibold">Q：</span>
+                {q.phrase || '—'}
+              </div>
+              {q.comment && (
+                <div className="text-sm text-gray-300 mt-1">補足：{q.comment}</div>
+              )}
+              <div className="text-xs text-gray-400 mt-1">
+                by {q.userName ?? '（名無し）'}
+              </div>
+
+              {/* 回答一覧 */}
+              <div className="mt-3 space-y-2">
+                {(answersByQ[q.id] ?? []).map((a) => (
+                  <div key={a.id} className="rounded-lg bg-gray-900 p-3 border border-gray-700">
+                    <div className="text-sm">
+                      <span className="font-semibold">表現：</span>{a.phrase ?? '—'}
+                    </div>
+                    <div className="text-sm">
+                      <span className="font-semibold">意味：</span>{a.meaning ?? '—'}
+                    </div>
+                    <div className="text-sm">
+                      <span className="font-semibold">ニュアンス・使い方：</span>{a.nuance ?? '—'}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      by {a.userName ?? '（名無し）'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 回答フォーム */}
+              <div className="mt-3">
+                <AnswerForm questionId={q.id} />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </section>
     </main>
   );
